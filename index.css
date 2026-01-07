@@ -36,3 +36,10 @@ button {
 button:hover {
     background-color: #018786;
 }
+
+#status {
+    min-height: 20px;
+    font-size: 0.9em;
+    font-weight: bold;
+    text-align: center;
+}

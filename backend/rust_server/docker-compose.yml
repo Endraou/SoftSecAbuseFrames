@@ -1,0 +1,57 @@
+services:
+  # Frontend: Serves your HTML/JS/CSS files
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ../../:/usr/share/nginx/html # Mounts your current folder to Nginx
+
+  # Primary Database (Server 1)
+  db_primary:
+    image: postgres:15
+    command: ["postgres", "-c", "client_encoding=utf8", "-c", "lc_messages=en_US.utf8"]
+    environment:
+      POSTGRES_USER: notes_admin
+      POSTGRES_PASSWORD: "0924"
+      POSTGRES_DB: secure_notes_db
+      LANG: en_US.utf8
+      LC_ALL: en_US.utf8
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d # Auto-runs 01_init.sql
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notes_admin -d secure_notes_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Replica Database (Server 2 - Resilience)
+  db_replica:
+    image: postgres:15
+    command: ["postgres", "-c", "client_encoding=utf8", "-c", "lc_messages=en_US.utf8"]
+    environment:
+      POSTGRES_USER: notes_admin
+      POSTGRES_PASSWORD: "0924"
+      POSTGRES_DB: secure_notes_db
+      LANG: en_US.utf8
+      LC_ALL: en_US.utf8
+    depends_on:
+      - db_primary
+
+  # Rust Backend
+  backend:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://notes_admin:0924@db_primary:5432/secure_notes_db
+      - SQLX_OFFLINE=true
+    depends_on:
+      db_primary:
+        condition: service_healthy # Backend waits for the healthcheck to pass
+  
+volumes:
+  db_data:

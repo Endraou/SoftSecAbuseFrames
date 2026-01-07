@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id as \"id!\", owner_id as \"owner_id!\", title as \"title!\", content as \"content!\", locked_by, locked_at\n        FROM notes n\n        LEFT JOIN note_shares s ON n.id = s.note_id\n        WHERE n.id = $1 AND (n.owner_id = $2 OR s.user_id = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "locked_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "locked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "f484e8a76d3efd99f4154580160769566b541b4d78f42e36ff43b70bfa3058aa"
+}
