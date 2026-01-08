@@ -1,20 +1,31 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <title>Mes Notes</title>
     <link rel="stylesheet" href="index.css">
 </head>
+
 <body>
     <div class="container">
-        <h1>Prise de Notes</h1>
-        <textarea id="noteInput" placeholder="Tape ton texte ici..."></textarea>
-        <button id="saveBtn">Sauvegarder la note</button>
-        <div id="status"></div>
-        <div style="text-align: right;">
-        <button id="logoutBtn" style="background-color: #cf6679; color: white;">Déconnexion</button>
-</div>
+        <h1>Mes Notes</h1>
+        <div class="main-layout">
+            <ul id="notesList"></ul>
+
+            <div class="editor">
+                <input type="hidden" id="noteId">
+                <textarea id="noteInput" placeholder="Tape ton texte ici..."></textarea>
+                <div class="actions">
+                    <button id="saveBtn">Sauvegarder</button>
+                    <button id="newBtn">Nouvelle note</button>
+                    <button id="deleteBtn" style="display: none; background-color: #ff4444;">Supprimer</button>
+                </div>
+            </div>
+            <button id="logoutBtn" style="background-color: #cf6679; color: white;">Déconnexion</button>
+        </div>
     </div>
     <script src="index.js"></script>
 </body>
+
 </html>
