@@ -36,7 +36,7 @@ async fn main() {
 
     // Inside your main() function:
     let cors = CorsLayer::new()
-        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT])
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
         .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE])
         .allow_origin("http://localhost:8080".parse::<axum::http::HeaderValue>().unwrap());
 
@@ -45,7 +45,7 @@ async fn main() {
     // 1. Define routes that REQUIRE authentication
     let protected_routes = Router::new()
         .route("/notes", get(handlers::handlers::list_notes).post(handlers::handlers::create_note))
-        .route("/notes/:id", get(handlers::handlers::get_note).put(handlers::handlers::update_note))
+        .route("/notes/:id", get(handlers::handlers::get_note).put(handlers::handlers::update_note).delete(handlers::handlers::delete_note))
         .route("/notes/:id/lock", post(handlers::handlers::lock_note))
         .route("/notes/:id/share", post(handlers::handlers::share_note))
         .layer(middleware::from_fn(auth::authorize)); // Apply auth ONLY here

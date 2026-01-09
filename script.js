@@ -4,6 +4,38 @@ const noteId = document.getElementById('noteId');
 const deleteBtn = document.getElementById('deleteBtn');
 const saveBtn = document.getElementById('saveBtn'); // On garde cet ID fixe
 
+// Fonction pour décoder le JWT et vérifier l'expiration (tiré de index.js)
+const isTokenExpired = (token) => {
+    if (!token) return true;
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c =>
+            '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+        ).join(''));
+        const { exp } = JSON.parse(jsonPayload);
+        return (Date.now() >= exp * 1000);
+    } catch (e) {
+        return true;
+    }
+};
+
+// Vérification immédiate au chargement
+const token = localStorage.getItem('token');
+if (!token || isTokenExpired(token)) {
+    console.log("Session invalide, redirection...");
+    localStorage.removeItem('token');
+    window.location.href = "register.html";
+}
+
+const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+    };
+};
+
 const toggleUI = (isEditing) => {
     if (isEditing) {
         deleteBtn.style.display = "inline-block";
@@ -20,10 +52,23 @@ const toggleUI = (isEditing) => {
 
 const loadNotes = async () => {
     try {
-        const response = await fetch('http://localhost:3000/notes');
-        const notes = await response.json();
+        const response = await fetch('http://localhost:3000/notes', {
+            headers: getAuthHeaders() 
+        });
+        
+        // 1. Vérifier l'auth avant de tenter de lire le JSON
+        if (response.status === 401) {
+            localStorage.removeItem('token');
+            window.location.href = "register.html";
+            return;
+        }
+
+        if (!response.ok) throw new Error("Erreur serveur");
+
+        // 2. Maintenant on peut lire le JSON en sécurité
+        const notes = await response.json(); 
         notesList.innerHTML = notes.map(n => `
-            <li class="note-item" onclick="editNote(${n.id}, '${n.content.replace(/'/g, "\\'")}')">
+            <li class="note-item" onclick="editNote('${n.id}', '${n.content.replace(/'/g, "\\'")}')">
                 <span>${n.content.substring(0, 15)}...</span>
             </li>
         `).join('');
@@ -44,11 +89,21 @@ document.getElementById('newBtn').addEventListener('click', () => {
 
 // La fonction de suppression
 const deleteNote = async (id) => {
-    if (!confirm("Supprimer cette note ?")) return;
+    if (!id) return;
+    if (!confirm("Supprimer cette note définitivement ?")) return;
+    
     try {
-        await fetch(`http://localhost:3000/notes/${id}`, { method: 'DELETE' });
-        toggleUI(false);
-        loadNotes();
+        const response = await fetch(`http://localhost:3000/notes/${id}`, { 
+            method: 'DELETE', // Vérifie que ton main.rs autorise DELETE dans le CORS
+            headers: getAuthHeaders() 
+        });
+
+        if (response.ok) {
+            toggleUI(false);
+            loadNotes();
+        } else {
+            alert("Action non autorisée ou note introuvable.");
+        }
     } catch (err) {
         console.error("Erreur suppression :", err);
     }
@@ -63,27 +118,47 @@ const handleSave = async () => {
     const content = noteInput.value.trim();
     if (content === "") return alert("C'est vide !");
 
-    const id = noteId.value; // Si vide = création, si rempli = update
+    const id = noteId.value; // C'est l'UUID de la note sélectionnée
+
+    const payload = {
+        title: "Note mise à jour", // Le backend Rust attend un titre
+        content: content
+    };
 
     try {
-        const response = await fetch('http://localhost:3000/notes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                id: id ? parseInt(id) : null,
-                text: content,
-                date: new Date().toISOString()
-            })
-        });
+        let response;
+        
+        if (id) {
+            // MODE UPDATE : On vise l'URL avec l'ID et la méthode PUT
+            response = await fetch(`http://localhost:3000/notes/${id}`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(payload)
+            });
+        } else {
+            // MODE CREATION : On utilise POST sur la route racine
+            response = await fetch('http://localhost:3000/notes', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(payload)
+            });
+        }
 
         if (response.ok) {
-            toggleUI(false);
-            loadNotes();
+            toggleUI(false); // Reset le formulaire
+            loadNotes();     // Rafraîchit la liste
+        } else {
+            const error = await response.json();
+            console.error("Erreur serveur :", error);
         }
     } catch (err) {
-        console.error("Erreur save/update :", err);
+        console.error("Erreur lors de la sauvegarde :", err);
     }
 };
 
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    localStorage.removeItem('token');
+    window.location.href = "register.html";
+});
 saveBtn.addEventListener('click', handleSave);
 loadNotes();

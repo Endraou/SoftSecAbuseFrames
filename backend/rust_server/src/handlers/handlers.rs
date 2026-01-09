@@ -106,6 +106,24 @@ pub async fn update_note(
     Ok(Json(note))
 }
 
+pub async fn delete_note(
+    State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
+    Path(note_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let result = sqlx::query("DELETE FROM notes WHERE id = $1 AND owner_id = $2")
+        .bind(note_id)
+        .bind(user_id)
+        .execute(&pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Unauthorized);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn lock_note(
     State(_pool): State<PgPool>,
     Path(_id): Path<Uuid>,
