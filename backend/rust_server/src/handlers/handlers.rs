@@ -4,6 +4,7 @@ use axum::{
     Json,
     Extension,
 };
+use sqlx::Row;
 use sqlx::PgPool;
 use uuid::Uuid;
 use crate::models::{Note, ShareRequest};
@@ -20,17 +21,16 @@ pub async fn list_notes(
     State(pool): State<PgPool>,
     Extension(user_id): Extension<Uuid>,
 ) -> Result<Json<Vec<Note>>, AppError> {
-    let notes = sqlx::query_as!(
-        Note,
+    // On utilise DISTINCT pour éviter les doublons dus au LEFT JOIN
+    let notes = sqlx::query_as::<_, Note>(
         r#"
-        SELECT id as "id!", owner_id as "owner_id!", title as "title!", content as "content!", locked_by, locked_at
+        SELECT DISTINCT n.id, n.owner_id, n.title, n.content, n.locked_by, n.locked_at
         FROM notes n
         LEFT JOIN note_shares s ON n.id = s.note_id
         WHERE n.owner_id = $1 OR s.user_id = $1
-        GROUP BY n.id, n.owner_id, n.title, n.content, n.locked_by, n.locked_at
-        "#,
-        user_id
+        "#
     )
+    .bind(user_id)
     .fetch_all(&pool)
     .await?;
 
@@ -89,20 +89,25 @@ pub async fn update_note(
     Path(note_id): Path<Uuid>,
     Json(payload): Json<CreateNoteRequest>,
 ) -> Result<Json<Note>, AppError> {
-    let note = sqlx::query_as!(
-        Note,
+    let note = sqlx::query_as::<_, Note>(
         r#"
-        UPDATE notes SET title = $1, content = $2 
-        WHERE id = $3 AND owner_id = $4 
-        RETURNING id as "id!", owner_id as "owner_id!", title as "title!", content as "content!", locked_by, locked_at
-        "#,
-        payload.title,
-        payload.content,
-        note_id,
-        user_id
+        UPDATE notes 
+        SET title = $1, content = $2 
+        WHERE id = $3 AND (
+            owner_id = $4 OR 
+            EXISTS (SELECT 1 FROM note_shares WHERE note_id = $3 AND user_id = $4 AND can_write = true)
+        )
+        RETURNING id, owner_id, title, content, locked_by, locked_at
+        "#
     )
+    .bind(&payload.title)
+    .bind(&payload.content)
+    .bind(note_id)
+    .bind(user_id)
     .fetch_one(&pool)
-    .await?;
+    .await
+    .map_err(|_| AppError::Unauthorized)?;
+
     Ok(Json(note))
 }
 
@@ -133,10 +138,45 @@ pub async fn lock_note(
 }
 
 pub async fn share_note(
-    State(_pool): State<PgPool>,
-    Path(_id): Path<Uuid>,
-    Json(_payload): Json<ShareRequest>,
+    State(pool): State<PgPool>,
+    Extension(current_user_id): Extension<Uuid>,
+    Path(note_id): Path<Uuid>,
+    Json(payload): Json<ShareRequest>,
 ) -> Result<StatusCode, AppError> {
-    // Logic for sharing goes here
+    // 1. Vérifier la propriété (Sécurité avant tout miaou)
+    let row = sqlx::query("SELECT owner_id FROM notes WHERE id = $1")
+        .bind(note_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::Internal("Note introuvable".into()))?;
+
+    let owner_id: Uuid = row.get("owner_id");
+    if owner_id != current_user_id {
+        return Err(AppError::Unauthorized);
+    }
+
+    // 2. Trouver l'ID du destinataire par son nom
+    let target_row = sqlx::query("SELECT id FROM users WHERE username = $1")
+        .bind(&payload.username)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::Internal("Utilisateur introuvable".into()))?;
+
+    let target_id: Uuid = target_row.get("id");
+
+    if target_id == current_user_id {
+        return Err(AppError::Internal("Vous possédez déjà cette note".into()));
+    }
+
+    // 3. Insérer le partage
+    sqlx::query(
+        "INSERT INTO note_shares (note_id, user_id, can_write) VALUES ($1, $2, $3) ON CONFLICT (note_id, user_id) DO UPDATE SET can_write = $3"
+    )
+    .bind(note_id)
+    .bind(target_id)
+    .bind(payload.can_write)
+    .execute(&pool)
+    .await?;
+
     Ok(StatusCode::OK)
 }

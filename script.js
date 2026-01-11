@@ -21,18 +21,21 @@ const isTokenExpired = (token) => {
 };
 
 // Vérification immédiate au chargement
-const token = localStorage.getItem('token');
+const token = sessionStorage.getItem('token');
+
 if (!token || isTokenExpired(token)) {
-    console.log("Session invalide, redirection...");
-    localStorage.removeItem('token');
+    console.log("Session invalide ou absente, redirection...");
+    sessionStorage.removeItem('token');
     window.location.href = "register.html";
+} else {
+    console.log("Token trouvé, accès autorisé miaou");
 }
 
 const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
+    const currentToken = sessionStorage.getItem('token');
     return {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${currentToken}`
     };
 };
 
@@ -51,29 +54,42 @@ const toggleUI = (isEditing) => {
 };
 
 const loadNotes = async () => {
+    const response = await fetch('http://localhost:3000/notes', {
+        headers: getAuthHeaders()
+    });
+    const notes = await response.json();
+    notesList.innerHTML = notes.map(n => `
+        <li class="note-item">
+            <span onclick="editNote('${n.id}', '${n.content.replace(/'/g, "\\'")}')">
+                ${n.content.substring(0, 15)}...
+            </span>
+            <button onclick="promptShare('${n.id}')">🤝 Partager</button>
+        </li>
+    `).join('');
+};
+
+window.promptShare = async (id) => {
+    const targetName = prompt("Username du destinataire :");
+    if (!targetName) return;
+
     try {
-        const response = await fetch('http://localhost:3000/notes', {
-            headers: getAuthHeaders() 
+        const response = await fetch(`http://localhost:3000/notes/${id}/share`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                username: targetName,
+                can_write: true
+            })
         });
-        
-        // 1. Vérifier l'auth avant de tenter de lire le JSON
-        if (response.status === 401) {
-            localStorage.removeItem('token');
-            window.location.href = "register.html";
-            return;
+
+        if (response.ok) {
+            alert("Accès partagé miaou");
+        } else {
+            const err = await response.json();
+            alert("Erreur : " + err.error);
         }
-
-        if (!response.ok) throw new Error("Erreur serveur");
-
-        // 2. Maintenant on peut lire le JSON en sécurité
-        const notes = await response.json(); 
-        notesList.innerHTML = notes.map(n => `
-            <li class="note-item" onclick="editNote('${n.id}', '${n.content.replace(/'/g, "\\'")}')">
-                <span>${n.content.substring(0, 15)}...</span>
-            </li>
-        `).join('');
     } catch (err) {
-        console.error("Erreur chargement :", err);
+        console.error(err);
     }
 };
 
@@ -91,11 +107,11 @@ document.getElementById('newBtn').addEventListener('click', () => {
 const deleteNote = async (id) => {
     if (!id) return;
     if (!confirm("Supprimer cette note définitivement ?")) return;
-    
+
     try {
-        const response = await fetch(`http://localhost:3000/notes/${id}`, { 
+        const response = await fetch(`http://localhost:3000/notes/${id}`, {
             method: 'DELETE', // Vérifie que ton main.rs autorise DELETE dans le CORS
-            headers: getAuthHeaders() 
+            headers: getAuthHeaders()
         });
 
         if (response.ok) {
@@ -127,7 +143,7 @@ const handleSave = async () => {
 
     try {
         let response;
-        
+
         if (id) {
             // MODE UPDATE : On vise l'URL avec l'ID et la méthode PUT
             response = await fetch(`http://localhost:3000/notes/${id}`, {
@@ -157,7 +173,7 @@ const handleSave = async () => {
 };
 
 document.getElementById('logoutBtn').addEventListener('click', () => {
-    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
     window.location.href = "register.html";
 });
 saveBtn.addEventListener('click', handleSave);

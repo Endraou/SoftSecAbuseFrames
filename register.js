@@ -1,4 +1,5 @@
 const statusDiv = document.getElementById('status');
+sessionStorage.removeItem('token');
 
 // Helper to show messages in the UI instead of alerts
 const showMessage = (msg, isError = true) => {
@@ -20,7 +21,7 @@ async function handleAuth(url, data) {
         const result = await response.json();
 
         if (response.ok) {
-            localStorage.setItem('token', result.token);
+            sessionStorage.setItem('token', result.token);
             showMessage("Success! Redirecting...", false);
             setTimeout(() => {
                 window.location.href = "index.html"; // Redirect to your notes page

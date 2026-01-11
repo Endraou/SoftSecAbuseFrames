@@ -1,7 +1,7 @@
-use axum::{routing::{get, post, put}, Router, middleware};
+use axum::{routing::{get, post}, Router, middleware};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
-use tower_http::cors::{Any, CorsLayer}; // Add to Cargo.toml: tower-http = { version = "0.5", features = ["cors"] }
+use tower_http::cors::CorsLayer; // Add to Cargo.toml: tower-http = { version = "0.5", features = ["cors"] }
 
 mod handlers;
 mod auth;

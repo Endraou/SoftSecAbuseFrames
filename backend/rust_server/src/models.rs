@@ -15,7 +15,7 @@ pub struct Note {
 
 #[derive(Deserialize)]
 pub struct ShareRequest {
-    pub user_id: Uuid,
+    pub username: String,
     pub can_write: bool,
 }
 

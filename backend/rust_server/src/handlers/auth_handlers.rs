@@ -1,4 +1,4 @@
-use axum::{extract::State, Json, http::StatusCode};
+use axum::{extract::State, Json};
 use sqlx::PgPool;
 use crate::auth::{hash_password, verify_password, create_jwt};
 use crate::models::{LoginRequest, AuthResponse, RegisterRequest};
