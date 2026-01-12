@@ -38,7 +38,7 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 // Create a JWT token for a user
 pub fn create_jwt(user_id: Uuid) -> Result<String, StatusCode> {
-    let expiration = Utc::now() + Duration::hours(24);
+    let expiration = Utc::now() + Duration::minutes(20);
     let claims = Claims {
         sub: user_id,
         exp: expiration.timestamp() as usize,
