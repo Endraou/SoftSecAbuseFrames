@@ -1,10 +1,16 @@
 use std::sync::Arc;
-use axum::{routing::{get, post}, Router, middleware, http::header::{CONTENT_SECURITY_POLICY, HeaderValue}};
+use axum::{
+    routing::{get, post}, 
+    Router, 
+    middleware, 
+    http::header::{CONTENT_SECURITY_POLICY, HeaderValue},
+    extract::DefaultBodyLimit
+};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::cors::CorsLayer; // Add to Cargo.toml: tower-http = { version = "0.5", features = ["cors"] }
-use axum_governor::{GovernorLayer, GovernorConfigBuilder};
+use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 
 mod handlers;
 mod auth;
@@ -31,6 +37,14 @@ async fn main() {
         writer_pool,
         reader_pool,
     });
+
+    let governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(2)
+            .burst_size(5)
+            .finish()
+            .unwrap()
+    );
 
     let csp_layer = SetResponseHeaderLayer::if_not_present(
         CONTENT_SECURITY_POLICY,
@@ -74,12 +88,4 @@ async fn main() {
     println!("Secure server listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
-
-    let governor_conf = Arc::new(
-    GovernorConfigBuilder::default()
-        .per_second(2) // 2 requêtes max par seconde
-        .burst_size(5) // On autorise un petit pic de 5 requêtes d'un coup
-        .finish()
-        .unwrap()
-);
 }
