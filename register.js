@@ -68,7 +68,7 @@ async function handleAuth(url, data) {
             // Clear timer on successful login
             localStorage.removeItem('lastAuthAttempt'); 
             showMessage("Success! Redirecting...", false);
-            setTimeout(() => { window.location.href = "index.html"; }, 1000);
+            setTimeout(() => { window.location.href = "main.html"; }, 1000);
         } else {
             // SET TIMER ON FAILURE
             localStorage.setItem('lastAuthAttempt', Date.now().toString());
