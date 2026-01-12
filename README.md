@@ -48,7 +48,7 @@ To ensure high availability and data durability:
 To ensure you can test the full functionality without manually installing PostgreSQL, we have containerized the entire stack.
 
 ### Setup & Launch
-0. Ensure you have Docker install on your machine
+0. Ensure you have Docker and cargo installed on your machine
 
 1. Open a terminal in the project root.
 
@@ -66,4 +66,4 @@ To ensure you can test the full functionality without manually installing Postgr
 5. Go to localhost:8080
 
 ## For Windows Users
-Install **Docker Desktop** for Windows and ensure it is running before doing 3.
+Install **Docker Desktop** for Windows and cargo and ensure Docker Desktop is running before doing 3.
