@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT can_write FROM note_shares \n        WHERE note_id = $1 AND user_id = $2\n        UNION\n        SELECT true FROM notes WHERE id = $1 AND owner_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "can_write",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "577f6e9479396a70fbf59c95dbeda4b55504b4d79489412d08a584e0f9433d32"
+}

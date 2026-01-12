@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE notes \n        SET locked_by = $1, locked_at = NOW()\n        WHERE id = $2 AND (locked_by IS NULL OR locked_by = $1 OR locked_at < NOW() - INTERVAL '15 minutes')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e2c0d5936bf60ce0a1248ff0ca33ccb28d311fb8bc716860ca79e1fca95836a"
+}

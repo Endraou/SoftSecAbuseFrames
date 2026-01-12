@@ -21,13 +21,23 @@ pub async fn list_notes(
     State(pool): State<PgPool>,
     Extension(user_id): Extension<Uuid>,
 ) -> Result<Json<Vec<Note>>, AppError> {
-    // On utilise DISTINCT pour éviter les doublons dus au LEFT JOIN
     let notes = sqlx::query_as::<_, Note>(
         r#"
-        SELECT DISTINCT n.id, n.owner_id, n.title, n.content, n.locked_by, n.locked_at
+        SELECT 
+            n.id, 
+            n.owner_id, 
+            n.title, 
+            n.content, 
+            n.locked_by, 
+            n.locked_at,
+            (n.owner_id = $1 OR EXISTS (
+                SELECT 1 FROM note_shares 
+                WHERE note_id = n.id AND user_id = $1 AND can_write = true
+            )) as can_write
         FROM notes n
         LEFT JOIN note_shares s ON n.id = s.note_id
         WHERE n.owner_id = $1 OR s.user_id = $1
+        GROUP BY n.id
         "#
     )
     .bind(user_id)
@@ -46,11 +56,11 @@ pub async fn create_note(
         Note,
         r#"
         INSERT INTO notes (owner_id, title, content) VALUES ($1, $2, $3) 
-        RETURNING id as "id!", owner_id as "owner_id!", title as "title!", content as "content!", locked_by, locked_at
+        RETURNING id as "id!", owner_id as "owner_id!", title as "title!", 
+                content as "content!", locked_by, locked_at, 
+                true as "can_write!" -- Add this line
         "#,
-        user_id,
-        payload.title,
-        payload.content
+        user_id, payload.title, payload.content
     )
     .fetch_one(&pool)
     .await?;
@@ -66,11 +76,17 @@ pub async fn get_note(
     let note = sqlx::query_as!(
         Note,
         r#"
-        SELECT n.id, n.owner_id, n.title, n.content, n.locked_by,
-               (n.owner_id = $2 OR EXISTS (
-                   SELECT 1 FROM note_shares 
-                   WHERE note_id = $1 AND user_id = $2 AND can_write = true
-               )) as "can_write!"
+        SELECT 
+            n.id as "id!", 
+            n.owner_id as "owner_id!", 
+            n.title as "title!", 
+            n.content as "content!", 
+            n.locked_by, 
+            n.locked_at, 
+            (n.owner_id = $2 OR EXISTS (
+                SELECT 1 FROM note_shares 
+                WHERE note_id = $1 AND user_id = $2 AND can_write = true
+            )) as "can_write!"
         FROM notes n
         LEFT JOIN note_shares s ON n.id = s.note_id
         WHERE n.id = $1 AND (n.owner_id = $2 OR s.user_id = $2)
@@ -92,8 +108,7 @@ pub async fn update_note(
     Path(note_id): Path<Uuid>,
     Json(payload): Json<CreateNoteRequest>,
 ) -> Result<Json<Note>, AppError> {
-    // Check if user has write access and if the lock is held by them (or no one)
-    let note = sqlx::query_as::<_, Note>(
+    let result = sqlx::query_as::<_, Note>(
         r#"
         UPDATE notes 
         SET title = $1, content = $2, locked_by = NULL, locked_at = NULL
@@ -103,18 +118,20 @@ pub async fn update_note(
             EXISTS (SELECT 1 FROM note_shares WHERE note_id = $3 AND user_id = $4 AND can_write = true)
         )
         AND (locked_by IS NULL OR locked_by = $4)
-        RETURNING id, owner_id, title, content, locked_by, locked_at
+        RETURNING id, owner_id, title, content, locked_by, locked_at, true as can_write
         "#
     )
     .bind(&payload.title)
     .bind(&payload.content)
     .bind(note_id)
     .bind(user_id)
-    .fetch_one(&pool)
-    .await
-    .map_err(|_| AppError::Internal("Update failed: Note locked or unauthorized".into()))?;
+    .fetch_optional(&pool)
+    .await?;
 
-    Ok(Json(note))
+    match result {
+        Some(note) => Ok(Json(note)),
+        None => Err(AppError::Locked), // This matches your error.rs variant
+    }
 }
 
 pub async fn delete_note(
@@ -194,9 +211,10 @@ async fn check_access(pool: &PgPool, user_id: &Uuid, note_id: &Uuid, require_wri
     .await?;
 
     match row {
-        Some(r) => if require_write { Ok(r.can_write) } else { Ok(true) },
-        None => Ok(false)
-    }
+    // Use unwrap_or(false) to convert Option<bool> to bool
+    Some(r) => if require_write { Ok(r.can_write.unwrap_or(false)) } else { Ok(true) },
+    None => Ok(false)
+}
 }
 
 pub async fn lock_note(
@@ -233,7 +251,6 @@ pub async fn unlock_note(
     Extension(user_id): Extension<Uuid>,
     Path(note_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    // Only the person who holds the lock (or the owner) should be able to unlock it early
     let result = sqlx::query!(
         r#"
         UPDATE notes 
@@ -243,8 +260,7 @@ pub async fn unlock_note(
         note_id, user_id
     )
     .execute(&pool)
-    .await
-    .map_err(|e| AppError::Internal(e.to_string()))?;
+    .await?; // Just use ? here, SqlxError is already handled by From implementation
 
     if result.rows_affected() == 0 {
         return Ok(StatusCode::NOT_MODIFIED);

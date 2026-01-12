@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            n.id as \"id!\", \n            n.owner_id as \"owner_id!\", \n            n.title as \"title!\", \n            n.content as \"content!\", \n            n.locked_by, \n            n.locked_at, \n            (n.owner_id = $2 OR EXISTS (\n                SELECT 1 FROM note_shares \n                WHERE note_id = $1 AND user_id = $2 AND can_write = true\n            )) as \"can_write!\"\n        FROM notes n\n        LEFT JOIN note_shares s ON n.id = s.note_id\n        WHERE n.id = $1 AND (n.owner_id = $2 OR s.user_id = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "locked_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "locked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "can_write!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "1c198b1f9a53e93ed0520634281358c626c8f064db7abcf14930363447d19caf"
+}

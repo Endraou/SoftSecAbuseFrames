@@ -11,6 +11,7 @@ pub struct Note {
     pub content: String,
     pub locked_by: Option<Uuid>,
     pub locked_at: Option<DateTime<Utc>>,
+    pub can_write: bool
 }
 
 #[derive(Deserialize)]

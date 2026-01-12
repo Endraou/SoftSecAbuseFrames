@@ -50,6 +50,33 @@ const getUserIdFromToken = (token) => {
     }
 };
 
+const acquireLock = async () => {
+    const noteId = document.getElementById('noteId').value;
+    const token = localStorage.getItem('token');
+    
+    if (!noteId) return; // New notes don't need a lock yet
+
+    try {
+        const response = await fetch(`http://localhost:3000/notes/${noteId}/lock`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.status === 409) {
+            // AppError::Conflict in your handlers.rs returns 409
+            noteInput.disabled = true;
+            statusDiv.innerText = "❌ Cette note est déjà en cours d'édition par quelqu'un d'autre.";
+        } else if (response.ok) {
+            statusDiv.innerText = "🔒 Verrouillé pour édition";
+        }
+    } catch (error) {
+        console.error("Lock error:", error);
+    }
+};
+
+// Trigger lock on focus
+noteInput.addEventListener('focus', acquireLock);
+
 const releaseLock = async () => {
     const id = noteId.value;
     if (!id) return;
@@ -216,7 +243,7 @@ const handleSave = async () => {
 
     const id = noteId.value;
     const payload = {
-        title: "Note", // You could add a title input to index.html later
+        title: "Note", // Struct requires a title field
         content: content
     };
 
@@ -239,16 +266,26 @@ const handleSave = async () => {
         }
 
         if (response.ok) {
+            const result = await response.json(); // Get the saved note back
+            
+            // If it was a new note, we now have an ID for it
+            if (!id && result.id) {
+                noteId.value = result.id;
+            }
+
             alert("Sauvegardé !");
-            toggleUI(false);
-            loadNotes();
-            document.querySelector('.main-layout').classList.remove('editing-active');
+            
+            // Optional: Don't call toggleUI(false) if you want to stay in the editor
+            loadNotes(); // Refresh the list
+        } else if (response.status === 409) {
+            alert("Erreur : Cette note est verrouillée par un autre utilisateur.");
         } else {
             const errData = await response.json();
-            alert("Erreur: " + (errData.error || "Action impossible"));
+            alert("Erreur : " + (errData.error || "Action impossible"));
         }
     } catch (err) {
         console.error("Save error:", err);
+        alert("Erreur de connexion au serveur.");
     }
 };
 
