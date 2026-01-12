@@ -10,6 +10,8 @@ use uuid::Uuid;
 use crate::models::{Note, ShareRequest};
 use crate::error::AppError;
 use serde::Deserialize;
+use crate::AppState;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct CreateNoteRequest {
@@ -18,7 +20,7 @@ pub struct CreateNoteRequest {
 }
 
 pub async fn list_notes(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(user_id): Extension<Uuid>,
 ) -> Result<Json<Vec<Note>>, AppError> {
     let notes = sqlx::query_as::<_, Note>(
@@ -41,35 +43,40 @@ pub async fn list_notes(
         "#
     )
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(&state.reader_pool)
     .await?;
 
     Ok(Json(notes))
 }
 
 pub async fn create_note(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(user_id): Extension<Uuid>,
     Json(payload): Json<CreateNoteRequest>,
 ) -> Result<(StatusCode, Json<Note>), AppError> {
+    // Sanitize the content here!
+    let clean_content = ammonia::clean(&payload.content);
+
     let note = sqlx::query_as!(
         Note,
         r#"
         INSERT INTO notes (owner_id, title, content) VALUES ($1, $2, $3) 
         RETURNING id as "id!", owner_id as "owner_id!", title as "title!", 
                 content as "content!", locked_by, locked_at, 
-                true as "can_write!" -- Add this line
+                true as "can_write!"
         "#,
-        user_id, payload.title, payload.content
+        user_id, 
+        payload.title, 
+        clean_content // Use the sanitized version
     )
-    .fetch_one(&pool)
+    .fetch_one(&state.writer_pool)
     .await?;
 
     Ok((StatusCode::CREATED, Json(note)))
 }
 
 pub async fn get_note(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(user_id): Extension<Uuid>,
     Path(note_id): Path<Uuid>,
 ) -> Result<Json<Note>, AppError> {
@@ -93,7 +100,7 @@ pub async fn get_note(
         "#,
         note_id, user_id
     )
-    .fetch_one(&pool)
+    .fetch_one(&state.reader_pool)
     .await
     .map_err(|_| AppError::Unauthorized)?;
 
@@ -103,11 +110,14 @@ pub async fn get_note(
 // --- ADDING THE MISSING FUNCTIONS BELOW ---
 
 pub async fn update_note(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(user_id): Extension<Uuid>,
     Path(note_id): Path<Uuid>,
     Json(payload): Json<CreateNoteRequest>,
 ) -> Result<Json<Note>, AppError> {
+    // Sanitize the content here!
+    let clean_content = ammonia::clean(&payload.content);
+
     let result = sqlx::query_as::<_, Note>(
         r#"
         UPDATE notes 
@@ -122,10 +132,10 @@ pub async fn update_note(
         "#
     )
     .bind(&payload.title)
-    .bind(&payload.content)
+    .bind(clean_content)
     .bind(note_id)
     .bind(user_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&state.writer_pool)
     .await?;
 
     match result {
@@ -135,14 +145,14 @@ pub async fn update_note(
 }
 
 pub async fn delete_note(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(user_id): Extension<Uuid>,
     Path(note_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let result = sqlx::query("DELETE FROM notes WHERE id = $1 AND owner_id = $2")
         .bind(note_id)
         .bind(user_id)
-        .execute(&pool)
+        .execute(&state.writer_pool)
         .await?;
 
     if result.rows_affected() == 0 {
@@ -153,7 +163,7 @@ pub async fn delete_note(
 }
 
 pub async fn share_note(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(current_user_id): Extension<Uuid>,
     Path(note_id): Path<Uuid>,
     Json(payload): Json<ShareRequest>,
@@ -161,7 +171,7 @@ pub async fn share_note(
     // 1. Vérifier la propriété (Sécurité avant tout miaou)
     let row = sqlx::query("SELECT owner_id FROM notes WHERE id = $1")
         .bind(note_id)
-        .fetch_optional(&pool)
+        .fetch_optional(&state.reader_pool)
         .await?
         .ok_or_else(|| AppError::Internal("Note introuvable".into()))?;
 
@@ -173,7 +183,7 @@ pub async fn share_note(
     // 2. Trouver l'ID du destinataire par son nom
     let target_row = sqlx::query("SELECT id FROM users WHERE username = $1")
         .bind(&payload.username)
-        .fetch_optional(&pool)
+        .fetch_optional(&state.reader_pool)
         .await?
         .ok_or_else(|| AppError::Internal("Utilisateur introuvable".into()))?;
 
@@ -190,14 +200,18 @@ pub async fn share_note(
     .bind(note_id)
     .bind(target_id)
     .bind(payload.can_write)
-    .execute(&pool)
+    .execute(&state.writer_pool)
     .await?;
 
     Ok(StatusCode::OK)
 }
 
 // Logic for checking access
-async fn check_access(pool: &PgPool, user_id: &Uuid, note_id: &Uuid, require_write: bool) -> Result<bool, AppError> {
+async fn check_access(
+    pool: &sqlx::PgPool, 
+    user_id: &Uuid, 
+    note_id: &Uuid, 
+    require_write: bool) -> Result<bool, AppError> {
     let row = sqlx::query!(
         r#"
         SELECT can_write FROM note_shares 
@@ -207,23 +221,22 @@ async fn check_access(pool: &PgPool, user_id: &Uuid, note_id: &Uuid, require_wri
         "#,
         note_id, user_id
     )
-    .fetch_optional(pool)
+    .fetch_optional(pool) // Use 'pool' (the argument), NOT 'state.reader_pool'
     .await?;
 
     match row {
-    // Use unwrap_or(false) to convert Option<bool> to bool
-    Some(r) => if require_write { Ok(r.can_write.unwrap_or(false)) } else { Ok(true) },
-    None => Ok(false)
-}
+        Some(r) => if require_write { Ok(r.can_write.unwrap_or(false)) } else { Ok(true) },
+        None => Ok(false)
+    }
 }
 
 pub async fn lock_note(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(user_id): Extension<Uuid>,
     Path(note_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     // 1. Check if user has write permission
-    if !check_access(&pool, &user_id, &note_id, true).await? {
+    if !check_access(&state.writer_pool, &user_id, &note_id, true).await? {
         return Err(AppError::Forbidden);
     }
 
@@ -236,7 +249,7 @@ pub async fn lock_note(
         "#,
         user_id, note_id
     )
-    .execute(&pool)
+    .execute(&state.writer_pool)
     .await?;
 
     if result.rows_affected() == 0 {
@@ -247,7 +260,7 @@ pub async fn lock_note(
 }
 
 pub async fn unlock_note(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Extension(user_id): Extension<Uuid>,
     Path(note_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
@@ -259,7 +272,7 @@ pub async fn unlock_note(
         "#,
         note_id, user_id
     )
-    .execute(&pool)
+    .execute(&state.writer_pool)
     .await?; // Just use ? here, SqlxError is already handled by From implementation
 
     if result.rows_affected() == 0 {

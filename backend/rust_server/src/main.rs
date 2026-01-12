@@ -1,6 +1,8 @@
-use axum::{routing::{get, post}, Router, middleware};
+use std::sync::Arc;
+use axum::{routing::{get, post}, Router, middleware, http::header::{CONTENT_SECURITY_POLICY, HeaderValue}};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::cors::CorsLayer; // Add to Cargo.toml: tower-http = { version = "0.5", features = ["cors"] }
 
 mod handlers;
@@ -8,31 +10,31 @@ mod auth;
 mod models;
 mod error;
 
+pub struct AppState {
+    pub writer_pool: sqlx::PgPool,
+    pub reader_pool: sqlx::PgPool,
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-    // Connection Pool (Resilience: you'd point this to your replicated DBs)
-    let mut retry_count = 0;
-    let pool = loop {
-        match PgPoolOptions::new()
-            .max_connections(5)
-            // Ensure this points to "db_primary" in your docker-compose
-            .connect(&db_url) 
-            .await 
-        {
-            Ok(pool) => break pool,
-            Err(e) => {
-                if retry_count >= 10 {
-                    panic!("Failed to connect to Postgres after 10 retries: {}", e);
-                }
-                retry_count += 1;
-                println!("Database not ready, retrying in 2s... (Attempt {})", retry_count);
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
-        }
-    };
+    let primary_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let replica_url = std::env::var("REPLICA_URL").expect("REPLICA_URL must be set");
+
+    let writer_pool = PgPoolOptions::new().max_connections(5).connect(&primary_url).await.unwrap();
+    let reader_pool = PgPoolOptions::new().max_connections(10).connect(&replica_url).await.unwrap();
+
+    let state = std::sync::Arc::new(AppState {
+        writer_pool,
+        reader_pool,
+    });
+
+    let csp_layer = SetResponseHeaderLayer::if_not_present(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self';"),
+    );
 
     // Inside your main() function:
     let cors = CorsLayer::new()
@@ -49,19 +51,21 @@ async fn main() {
         .route("/notes/:id/lock", post(handlers::handlers::lock_note))
         .route("/notes/:id/share", post(handlers::handlers::share_note))
         .route("/notes/:id/unlock", post(handlers::handlers::unlock_note))
-        .layer(middleware::from_fn(auth::authorize)); // Apply auth ONLY here
+        .layer(middleware::from_fn(auth::authorize))    // Apply auth ONLY here
+        .with_state(Arc::clone(&state));
 
     // 2. Define routes that are PUBLIC
     let auth_routes = Router::new()
         .route("/register", post(handlers::auth_handlers::register))
-        .route("/login", post(handlers::auth_handlers::login));
+        .route("/login", post(handlers::auth_handlers::login))
+        .with_state(Arc::clone(&state));
 
     // 3. Combine them into the main app
     let app = Router::new()
         .nest("/auth", auth_routes)  // Becomes /auth/register and /auth/login
         .merge(protected_routes)
-        .with_state(pool)
-        .layer(cors); // CORS remains at the very bottom to cover everything
+        .layer(cors) // CORS remains at the very bottom to cover everything
+        .layer(csp_layer);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     println!("Secure server listening on {}", addr);

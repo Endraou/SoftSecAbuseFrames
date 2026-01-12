@@ -44,10 +44,10 @@ button:hover {
 
 #notesList {
     flex: 1;
+    min-width: 200px; /* This ensures the list doesn't shrink to 0px */
     list-style: none;
     padding: 0;
-    max-height: 400px;
-    overflow-y: auto;
+    margin: 0;
 }
 
 #notesList li {
@@ -92,4 +92,45 @@ button:hover {
     margin-top: 10px;
     display: flex;
     gap: 10px;
+}
+
+/* Ensure the text span takes up all available space but cuts off neatly */
+.note-item span {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 10px; /* Space between text and button */
+}
+
+/* Style for notes you don't have permission to edit */
+.note-item.readonly {
+    opacity: 0.7;
+    border-left: 3px solid #555;
+    cursor: default;
+}
+
+/* Style for notes you can edit */
+.note-item.writable {
+    border-left: 3px solid #03dac6; /* Matches your theme color */
+}
+
+/* Adjust the share button size so it doesn't look like the big 'Save' button */
+.note-item button {
+    margin-top: 0; /* Override the default margin-top: 10px */
+    padding: 4px 8px;
+    font-size: 0.85em;
+    white-space: nowrap; /* Keep the emoji and text on one line */
+}
+
+.main-layout {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start; /* Prevents items from stretching vertically */
+}
+
+/* Adjust the Logout button so it sits neatly at the end */
+#logoutBtn {
+    flex: 0 0 auto;
+    padding: 10px;
 }

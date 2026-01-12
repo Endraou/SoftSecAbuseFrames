@@ -10,18 +10,24 @@ services:
   # Primary Database (Server 1)
   db_primary:
     image: postgres:15
-    command: ["postgres", "-c", "client_encoding=utf8", "-c", "lc_messages=en_US.utf8"]
+    # No custom 'user' or 'command' needed here for standard init
     environment:
       POSTGRES_USER: notes_admin
       POSTGRES_PASSWORD: "0924"
       POSTGRES_DB: secure_notes_db
-      LANG: en_US.utf8
-      LC_ALL: en_US.utf8
+      # Move your config flags here:
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"
+    command: [
+      "postgres",
+      "-c", "wal_level=replica",
+      "-c", "max_wal_senders=10",
+      "-c", "max_replication_slots=10",
+      "-c", "hot_standby=on"]
     ports:
       - "5433:5432"
     volumes:
-      - ./migrations:/docker-entrypoint-initdb.d # Auto-runs 01_init.sql
-      - db_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d # This runs your .sh and .sql scripts
+      - db_primary_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U notes_admin -d secure_notes_db"]
       interval: 5s
@@ -31,27 +37,38 @@ services:
   # Replica Database (Server 2 - Resilience)
   db_replica:
     image: postgres:15
-    command: ["postgres", "-c", "client_encoding=utf8", "-c", "lc_messages=en_US.utf8"]
+    # We add 'chmod 0700' after the backup finishes
+    entrypoint: [ "bash", "-c", "
+      until pg_isready -h db_primary -U notes_admin; do echo waiting for primary; sleep 2; done;
+      if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
+        rm -rf /var/lib/postgresql/data/*;
+        PGPASSWORD=0924 pg_basebackup -h db_primary -D /var/lib/postgresql/data -U notes_admin -vP -R;
+        chmod 0700 /var/lib/postgresql/data;
+      fi;
+      exec postgres" ]
+    user: postgres
     environment:
-      POSTGRES_USER: notes_admin
-      POSTGRES_PASSWORD: "0924"
-      POSTGRES_DB: secure_notes_db
-      LANG: en_US.utf8
-      LC_ALL: en_US.utf8
+      - POSTGRES_PASSWORD=0924
     depends_on:
-      - db_primary
+      db_primary:
+        condition: service_healthy
+    volumes:
+      - db_replica_data:/var/lib/postgresql/data
 
   # Rust Backend
   backend:
     build: .
+    restart: on-failure
     ports:
       - "3000:3000"
     environment:
       - DATABASE_URL=postgres://notes_admin:0924@db_primary:5432/secure_notes_db
+      - REPLICA_URL=postgres://notes_admin:0924@db_replica:5432/secure_notes_db
       - SQLX_OFFLINE=true
     depends_on:
       db_primary:
         condition: service_healthy # Backend waits for the healthcheck to pass
   
 volumes:
-  db_data:
+  db_primary_data:
+  db_replica_data:

@@ -52,7 +52,7 @@ const getUserIdFromToken = (token) => {
 
 const acquireLock = async () => {
     const noteId = document.getElementById('noteId').value;
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     
     if (!noteId) return; // New notes don't need a lock yet
 
@@ -112,21 +112,37 @@ const loadNotes = async () => {
     });
     const notes = await response.json();
     
-    // We assume your backend now returns the full Note object
-    notesList.innerHTML = notes.map(n => {
-        // Simple logic: if I am not the owner, it might be read-only
-        // (You can refine this if your backend sends a 'can_write' field)
-        const isReadIndicator = n.locked_by ? "🔒" : ""; 
-        
-        return `
-            <li class="note-item" onclick="editNote('${n.id}')">
-                <span>
-                    ${isReadIndicator} ${n.content.substring(0, 15)}...
-                </span>
-                <button onclick="event.stopPropagation(); promptShare('${n.id}')">🤝 Partager</button>
-            </li>
-        `;
-    }).join('');
+    // Clear the list first
+    notesList.innerHTML = "";
+
+    const currentUserId = getUserIdFromToken(token);
+
+    notes.forEach(n => {
+        const li = document.createElement('li');
+        li.className = `note-item ${n.can_write ? 'writable' : 'readonly'}`;
+        li.onclick = () => editNote(n.id);
+
+        // SECURE: .textContent automatically escapes the content for you
+        const span = document.createElement('span');
+        const lockIcon = n.locked_by ? "🔒 " : "";
+        const permission = n.can_write ? "" : " (Lecture seule)";
+        span.textContent = `${lockIcon}${n.content.substring(0, 15)}...${permission}`;
+
+        li.appendChild(span);
+
+        // Add button only if owner
+        if (n.owner_id == currentUserId) {
+            const btn = document.createElement('button');
+            btn.textContent = "🤝 Partager";
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                promptShare(n.id);
+            };
+            li.appendChild(btn);
+        }
+
+        notesList.appendChild(li);
+    });
 };
 
 window.promptShare = async (id) => {

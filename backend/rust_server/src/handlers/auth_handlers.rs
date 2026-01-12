@@ -1,11 +1,13 @@
 use axum::{extract::State, Json};
+use std::sync::Arc;
 use sqlx::PgPool;
 use crate::auth::{hash_password, verify_password, create_jwt};
 use crate::models::{LoginRequest, AuthResponse, RegisterRequest};
+use crate::AppState;
 use crate::error::AppError;
 
 pub async fn register(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let hashed = hash_password(&payload.password);
@@ -16,7 +18,7 @@ pub async fn register(
         payload.username, 
         hashed
     )
-    .fetch_one(&pool)
+    .fetch_one(&state.writer_pool)
     .await
     .map_err(|_| AppError::Internal("User already exists or DB error".into()))?;
 
@@ -25,7 +27,7 @@ pub async fn register(
 }
 
 pub async fn login(
-    State(pool): State<PgPool>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
     // Use double quotes \"id!\" for the alias
@@ -33,7 +35,7 @@ pub async fn login(
         "SELECT id as \"id!\", password_hash FROM users WHERE username = $1",
         payload.username
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&state.reader_pool)
     .await
     .map_err(|_| AppError::Internal("Database error".into()))?
     .ok_or(AppError::Unauthorized)?;

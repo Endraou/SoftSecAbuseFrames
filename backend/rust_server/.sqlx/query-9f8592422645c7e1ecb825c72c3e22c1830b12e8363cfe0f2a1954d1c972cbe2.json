@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO notes (owner_id, title, content) VALUES ($1, $2, $3) \n        RETURNING id as \"id!\", owner_id as \"owner_id!\", title as \"title!\", \n                content as \"content!\", locked_by, locked_at, \n                true as \"can_write!\" -- Add this line\n        ",
+  "query": "\n        INSERT INTO notes (owner_id, title, content) VALUES ($1, $2, $3) \n        RETURNING id as \"id!\", owner_id as \"owner_id!\", title as \"title!\", \n                content as \"content!\", locked_by, locked_at, \n                true as \"can_write!\"\n        ",
   "describe": {
     "columns": [
       {
@@ -56,5 +56,5 @@
       null
     ]
   },
-  "hash": "f035e2e5c14495c07e812f46895fde2c2ab7ac7c69d729aa8e5075b0b1582595"
+  "hash": "9f8592422645c7e1ecb825c72c3e22c1830b12e8363cfe0f2a1954d1c972cbe2"
 }
