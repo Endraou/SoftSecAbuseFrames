@@ -2,6 +2,7 @@ use axum::{routing::{get, post}, Router, middleware};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer; // Add to Cargo.toml: tower-http = { version = "0.5", features = ["cors"] }
+use axum_governor::{GovernorLayer, GovernorConfigBuilder};
 
 mod handlers;
 mod auth;
@@ -61,10 +62,20 @@ async fn main() {
         .nest("/auth", auth_routes)  // Becomes /auth/register and /auth/login
         .merge(protected_routes)
         .with_state(pool)
+        .layer(GovernorLayer { config: governor_conf }) // Protection globale
+        .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(cors); // CORS remains at the very bottom to cover everything
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     println!("Secure server listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+
+    let governor_conf = Arc::new(
+    GovernorConfigBuilder::default()
+        .per_second(2) // 2 requêtes max par seconde
+        .burst_size(5) // On autorise un petit pic de 5 requêtes d'un coup
+        .finish()
+        .unwrap()
+);
 }

@@ -1,6 +1,32 @@
 const statusDiv = document.getElementById('status');
 sessionStorage.removeItem('token');
 
+let attempts = 0;
+let isLocked = false;
+const MAX_ATTEMPTS = 5;
+const LOCK_TIME = 30000;
+
+function lockInterface() {
+    isLocked = true;
+    const buttons = [document.getElementById('loginBtn'), document.getElementById('regBtn')];
+    
+    buttons.forEach(btn => btn.disabled = true);
+    
+    let timeLeft = LOCK_TIME / 1000;
+    const timer = setInterval(() => {
+        showMessage(`Trop d'essais. Attendez ${timeLeft}s...`);
+        timeLeft--;
+        
+        if (timeLeft < 0) {
+            clearInterval(timer);
+            isLocked = false;
+            attempts = 0;
+            buttons.forEach(btn => btn.disabled = false);
+            showMessage("Vous pouvez réessayer.", false);
+        }
+    }, 1000);
+}
+
 // Helper to show messages in the UI instead of alerts
 const showMessage = (msg, isError = true) => {
     statusDiv.innerText = msg;
@@ -9,6 +35,8 @@ const showMessage = (msg, isError = true) => {
 };
         
 async function handleAuth(url, data) {
+    if (isLocked) return;
+
     showMessage("Processing...", false);
 
     try {
@@ -24,11 +52,16 @@ async function handleAuth(url, data) {
             sessionStorage.setItem('token', result.token);
             showMessage("Success! Redirecting...", false);
             setTimeout(() => {
-                window.location.href = "index.html"; // Redirect to your notes page
+                window.location.href = "index.html";
             }, 1000);
         } else {
-            // Backend errors (like "User already exists") are caught here
-            showMessage(result.message || "Authentication failed.");
+            // On compte l'échec ici
+            attempts++;
+            if (attempts >= MAX_ATTEMPTS) {
+                lockInterface();
+            } else {
+                showMessage(result.message || "Authentication failed.");
+            }
         }
     } catch (error) {
         showMessage("Connection failed. Is the server running?");
