@@ -43,3 +43,54 @@ button:hover {
     font-weight: bold;
     text-align: center;
 }
+
+/* Layout transition */
+.main-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* When editing is active, hide the list to focus on the text */
+.main-layout.editing-active #notesList {
+    display: none;
+}
+
+/* Distraction-free Editor */
+.editor {
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+.main-layout.editing-active textarea {
+    height: 400px; /* Expand the editor */
+    font-size: 1.1rem;
+    line-height: 1.6;
+    border-color: #03dac6;
+}
+
+/* Read-only visual state */
+textarea[readonly] {
+    background-color: #1a1a1a;
+    color: #888;
+    border-color: #444;
+    cursor: not-allowed;
+}
+
+/* Note items in the list */
+.note-item {
+    background: #1e1e1e;
+    margin-bottom: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+
+.note-item:hover {
+    border-color: #03dac6;
+}

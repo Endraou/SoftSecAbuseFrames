@@ -25,11 +25,6 @@ To ensure data durability, the system supports:
 - **SQLi Test:** Passing `' OR 1=1 --` as a search parameter is treated as a literal string by SQLx and fails to return unauthorized data.
 - **Locking Test:** If `locked_by` is set for a different UUID, `PUT` requests return a `409 Conflict`.
 
-## Setup
-1. Create a `.env` file: `DATABASE_URL=postgres://notes_admin:password@localhost:5432/secure_notes_db`
-2. Run migrations: `sqlx migrate run`
-3. Start server: `cargo run`
-
 
 ## How to Run
 

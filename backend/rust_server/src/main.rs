@@ -48,6 +48,7 @@ async fn main() {
         .route("/notes/:id", get(handlers::handlers::get_note).put(handlers::handlers::update_note).delete(handlers::handlers::delete_note))
         .route("/notes/:id/lock", post(handlers::handlers::lock_note))
         .route("/notes/:id/share", post(handlers::handlers::share_note))
+        .route("/notes/:id/unlock", post(handlers::handlers::unlock_note))
         .layer(middleware::from_fn(auth::authorize)); // Apply auth ONLY here
 
     // 2. Define routes that are PUBLIC

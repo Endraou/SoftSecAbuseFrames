@@ -39,6 +39,32 @@ const getAuthHeaders = () => {
     };
 };
 
+const getUserIdFromToken = (token) => {
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(base64));
+        return payload.sub; // This is the UUID from auth.rs
+    } catch (e) {
+        return null;
+    }
+};
+
+const releaseLock = async () => {
+    const id = noteId.value;
+    if (!id) return;
+
+    try {
+        await fetch(`http://localhost:3000/notes/${id}/unlock`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        console.log("Note déverrouillée");
+    } catch (err) {
+        console.error("Erreur unlock:", err);
+    }
+};
+
 const toggleUI = (isEditing) => {
     if (isEditing) {
         deleteBtn.style.display = "inline-block";
@@ -58,19 +84,30 @@ const loadNotes = async () => {
         headers: getAuthHeaders()
     });
     const notes = await response.json();
-    notesList.innerHTML = notes.map(n => `
-        <li class="note-item">
-            <span onclick="editNote('${n.id}', '${n.content.replace(/'/g, "\\'")}')">
-                ${n.content.substring(0, 15)}...
-            </span>
-            <button onclick="promptShare('${n.id}')">🤝 Partager</button>
-        </li>
-    `).join('');
+    
+    // We assume your backend now returns the full Note object
+    notesList.innerHTML = notes.map(n => {
+        // Simple logic: if I am not the owner, it might be read-only
+        // (You can refine this if your backend sends a 'can_write' field)
+        const isReadIndicator = n.locked_by ? "🔒" : ""; 
+        
+        return `
+            <li class="note-item" onclick="editNote('${n.id}')">
+                <span>
+                    ${isReadIndicator} ${n.content.substring(0, 15)}...
+                </span>
+                <button onclick="event.stopPropagation(); promptShare('${n.id}')">🤝 Partager</button>
+            </li>
+        `;
+    }).join('');
 };
 
 window.promptShare = async (id) => {
     const targetName = prompt("Username du destinataire :");
     if (!targetName) return;
+    
+    // Simple way to ask for permission level
+    const canWrite = confirm("Autoriser la modification (OK = Oui / Annuler = Lecture seule) ?");
 
     try {
         const response = await fetch(`http://localhost:3000/notes/${id}/share`, {
@@ -78,12 +115,12 @@ window.promptShare = async (id) => {
             headers: getAuthHeaders(),
             body: JSON.stringify({
                 username: targetName,
-                can_write: true
+                can_write: canWrite
             })
         });
 
         if (response.ok) {
-            alert("Accès partagé miaou");
+            alert(`Note partagée en mode ${canWrite ? 'Lecture/Écriture' : 'Lecture seule'} !`);
         } else {
             const err = await response.json();
             alert("Erreur : " + err.error);
@@ -93,14 +130,57 @@ window.promptShare = async (id) => {
     }
 };
 
-window.editNote = (id, content) => {
-    noteId.value = id;
-    noteInput.value = content;
+const canUserWrite = (note, currentUserId) => {
+    return note.owner_id === currentUserId || note.can_write === true;
+};
+
+window.editNote = async (id) => {
+    const response = await fetch(`http://localhost:3000/notes/${id}`, {
+        headers: getAuthHeaders()
+    });
+    const note = await response.json();
+
+    noteId.value = note.id;
+    noteInput.value = note.content;
+    
+    // Enter focus mode
+    document.querySelector('.main-layout').classList.add('editing-active');
+    
+    // Check write permission and lock status
+    if (!note.can_write) {
+        setEditorState(true, "Lecture seule");
+    } else if (note.locked_by && note.locked_by !== getUserIdFromToken(token)) {
+        setEditorState(true, "Verrouillé par un tiers");
+    } else {
+        // Try to lock
+        const lockRes = await fetch(`http://localhost:3000/notes/${id}/lock`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        setEditorState(!lockRes.ok, lockRes.ok ? "Enregistrer" : "Occupé...");
+    }
     toggleUI(true);
 };
 
-document.getElementById('newBtn').addEventListener('click', () => {
+function setEditorState(readOnly, btnText) {
+    noteInput.readOnly = readOnly;
+    saveBtn.innerText = btnText;
+    saveBtn.disabled = readOnly;
+}
+
+// Helper to clean up UI state
+const setReadOnlyMode = (isReadOnly, message = "Enregistrer") => {
+    noteInput.readOnly = isReadOnly;
+    saveBtn.disabled = isReadOnly;
+    saveBtn.innerText = isReadOnly ? "🔒 Lecture Seule" : "Enregistrer";
+    saveBtn.style.opacity = isReadOnly ? "0.5" : "1";
+    if (message !== "Enregistrer") saveBtn.innerText = message;
+};
+
+document.getElementById('newBtn').addEventListener('click', async () => {
+    await releaseLock(); // Release previous lock before clearing
     toggleUI(false);
+    document.querySelector('.main-layout').classList.remove('editing-active');
 });
 
 // La fonction de suppression
@@ -132,27 +212,25 @@ deleteBtn.addEventListener('click', () => {
 // La fonction unique pour sauvegarder OU mettre à jour
 const handleSave = async () => {
     const content = noteInput.value.trim();
-    if (content === "") return alert("C'est vide !");
+    if (content === "") return alert("Le contenu ne peut pas être vide !");
 
-    const id = noteId.value; // C'est l'UUID de la note sélectionnée
-
+    const id = noteId.value;
     const payload = {
-        title: "Note mise à jour", // Le backend Rust attend un titre
+        title: "Note", // You could add a title input to index.html later
         content: content
     };
 
     try {
         let response;
-
         if (id) {
-            // MODE UPDATE : On vise l'URL avec l'ID et la méthode PUT
+            // Update existing note
             response = await fetch(`http://localhost:3000/notes/${id}`, {
                 method: 'PUT',
                 headers: getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
         } else {
-            // MODE CREATION : On utilise POST sur la route racine
+            // Create new note
             response = await fetch('http://localhost:3000/notes', {
                 method: 'POST',
                 headers: getAuthHeaders(),
@@ -161,14 +239,16 @@ const handleSave = async () => {
         }
 
         if (response.ok) {
-            toggleUI(false); // Reset le formulaire
-            loadNotes();     // Rafraîchit la liste
+            alert("Sauvegardé !");
+            toggleUI(false);
+            loadNotes();
+            document.querySelector('.main-layout').classList.remove('editing-active');
         } else {
-            const error = await response.json();
-            console.error("Erreur serveur :", error);
+            const errData = await response.json();
+            alert("Erreur: " + (errData.error || "Action impossible"));
         }
     } catch (err) {
-        console.error("Erreur lors de la sauvegarde :", err);
+        console.error("Save error:", err);
     }
 };
 
@@ -178,3 +258,16 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
 });
 saveBtn.addEventListener('click', handleSave);
 loadNotes();
+
+window.addEventListener('beforeunload', () => {
+    const id = noteId.value;
+    const currentToken = sessionStorage.getItem('token');
+    if (id && currentToken) {
+        // Use keepalive to ensure the request finishes after the tab closes
+        fetch(`http://localhost:3000/notes/${id}/unlock`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${currentToken}` },
+            keepalive: true 
+        });
+    }
+});

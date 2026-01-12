@@ -66,13 +66,16 @@ pub async fn get_note(
     let note = sqlx::query_as!(
         Note,
         r#"
-        SELECT id as "id!", owner_id as "owner_id!", title as "title!", content as "content!", locked_by, locked_at
+        SELECT n.id, n.owner_id, n.title, n.content, n.locked_by,
+               (n.owner_id = $2 OR EXISTS (
+                   SELECT 1 FROM note_shares 
+                   WHERE note_id = $1 AND user_id = $2 AND can_write = true
+               )) as "can_write!"
         FROM notes n
         LEFT JOIN note_shares s ON n.id = s.note_id
         WHERE n.id = $1 AND (n.owner_id = $2 OR s.user_id = $2)
         "#,
-        note_id,
-        user_id
+        note_id, user_id
     )
     .fetch_one(&pool)
     .await
@@ -89,14 +92,17 @@ pub async fn update_note(
     Path(note_id): Path<Uuid>,
     Json(payload): Json<CreateNoteRequest>,
 ) -> Result<Json<Note>, AppError> {
+    // Check if user has write access and if the lock is held by them (or no one)
     let note = sqlx::query_as::<_, Note>(
         r#"
         UPDATE notes 
-        SET title = $1, content = $2 
-        WHERE id = $3 AND (
+        SET title = $1, content = $2, locked_by = NULL, locked_at = NULL
+        WHERE id = $3 
+        AND (
             owner_id = $4 OR 
             EXISTS (SELECT 1 FROM note_shares WHERE note_id = $3 AND user_id = $4 AND can_write = true)
         )
+        AND (locked_by IS NULL OR locked_by = $4)
         RETURNING id, owner_id, title, content, locked_by, locked_at
         "#
     )
@@ -106,7 +112,7 @@ pub async fn update_note(
     .bind(user_id)
     .fetch_one(&pool)
     .await
-    .map_err(|_| AppError::Unauthorized)?;
+    .map_err(|_| AppError::Internal("Update failed: Note locked or unauthorized".into()))?;
 
     Ok(Json(note))
 }
@@ -127,14 +133,6 @@ pub async fn delete_note(
     }
 
     Ok(StatusCode::NO_CONTENT)
-}
-
-pub async fn lock_note(
-    State(_pool): State<PgPool>,
-    Path(_id): Path<Uuid>,
-) -> Result<StatusCode, AppError> {
-    // Logic for locking goes here
-    Ok(StatusCode::OK)
 }
 
 pub async fn share_note(
@@ -177,6 +175,80 @@ pub async fn share_note(
     .bind(payload.can_write)
     .execute(&pool)
     .await?;
+
+    Ok(StatusCode::OK)
+}
+
+// Logic for checking access
+async fn check_access(pool: &PgPool, user_id: &Uuid, note_id: &Uuid, require_write: bool) -> Result<bool, AppError> {
+    let row = sqlx::query!(
+        r#"
+        SELECT can_write FROM note_shares 
+        WHERE note_id = $1 AND user_id = $2
+        UNION
+        SELECT true FROM notes WHERE id = $1 AND owner_id = $2
+        "#,
+        note_id, user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some(r) => if require_write { Ok(r.can_write) } else { Ok(true) },
+        None => Ok(false)
+    }
+}
+
+pub async fn lock_note(
+    State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
+    Path(note_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    // 1. Check if user has write permission
+    if !check_access(&pool, &user_id, &note_id, true).await? {
+        return Err(AppError::Forbidden);
+    }
+
+    // 2. Try to acquire lock if not already locked or if lock is expired (e.g., > 15 mins)
+    let result = sqlx::query!(
+        r#"
+        UPDATE notes 
+        SET locked_by = $1, locked_at = NOW()
+        WHERE id = $2 AND (locked_by IS NULL OR locked_by = $1 OR locked_at < NOW() - INTERVAL '15 minutes')
+        "#,
+        user_id, note_id
+    )
+    .execute(&pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Conflict); // Someone else is editing
+    }
+
+    Ok(StatusCode::OK)
+}
+
+pub async fn unlock_note(
+    State(pool): State<PgPool>,
+    Extension(user_id): Extension<Uuid>,
+    Path(note_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    // Only the person who holds the lock (or the owner) should be able to unlock it early
+    let result = sqlx::query!(
+        r#"
+        UPDATE notes 
+        SET locked_by = NULL, locked_at = NULL
+        WHERE id = $1 AND (locked_by = $2 OR owner_id = $2)
+        "#,
+        note_id, user_id
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    if result.rows_affected() == 0 {
+        return Ok(StatusCode::NOT_MODIFIED);
+    }
 
     Ok(StatusCode::OK)
 }
